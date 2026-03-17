@@ -1,0 +1,136 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// User Role
+enum Role {
+  USER
+  ADMIN
+}
+
+// User Model
+model User {
+  id        String   @id @default(uuid())
+  name      String
+  email     String   @unique
+  password  String
+  role      Role     @default(USER)
+  
+  reviews   Review[]
+  comments  Comment[]
+  likes     Like[]
+  watchlist Watchlist[]
+  purchases Purchase[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// Movie Series And Media
+model Media {
+  id                String   @id @default(uuid())
+  title             String
+  synopsis          String
+  genre             String[]
+  releaseYear       Int
+  director          String
+  cast              String[]
+  streamingPlatform String[]
+  priceType         PriceType @default(FREE)
+  streamingLink     String?
+  
+  reviews           Review[]
+  watchlist         Watchlist[]
+  purchases         Purchase[]
+
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}
+
+enum PriceType {
+  FREE
+  PREMIUM
+}
+
+// Review Model
+model Review {
+  id         String   @id @default(uuid())
+  rating     Int     
+  content    String
+  tags       String[]
+  isSpoiler  Boolean  @default(false)
+  isApproved Boolean  @default(false) // For Admin Approved
+  
+  userId     String
+  user       User     @relation(fields: [userId], references: [id])
+  mediaId    String
+  media      Media    @relation(fields: [mediaId], references: [id])
+  
+  comments   Comment[]
+  likes      Like[]
+
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+// Comment Model
+model Comment {
+  id        String   @id @default(uuid())
+  content   String
+  
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  reviewId  String
+  review    Review   @relation(fields: [reviewId], references: [id])
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// Like Model
+model Like {
+  id        String   @id @default(uuid())
+  
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  reviewId  String
+  review    Review   @relation(fields: [reviewId], references: [id])
+
+  @@unique([userId, reviewId]) 
+}
+
+// Watchlist Model
+model Watchlist {
+  id        String   @id @default(uuid())
+  
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  mediaId   String
+  media     Media    @relation(fields: [mediaId], references: [id])
+
+  @@unique([userId, mediaId])
+}
+
+// Payment And subcription Model
+model Purchase {
+  id             String   @id @default(uuid())
+  amount         Float
+  paymentStatus  PaymentStatus @default(PENDING)
+  
+  userId         String
+  user           User     @relation(fields: [userId], references: [id])
+  mediaId        String
+  media          Media    @relation(fields: [mediaId], references: [id])
+
+  createdAt      DateTime @default(now())
+}
+
+enum PaymentStatus {
+  PENDING
+  COMPLETED
+  FAILED
+}
