@@ -1,13 +1,13 @@
+import 'dotenv/config';
 import express, { Request, Response } from 'express';
 import cors from 'cors';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '@prisma/client';
-import dotenv from 'dotenv';
 import authRoutes from './routes/auth.route';
 import mediaRoutes from './routes/media.route';
 import reviewRoutes from './routes/review.route';
-
-dotenv.config({ quiet: true });
+import interactionRoutes from './routes/interaction.route';
+import paymentRoutes from './routes/payment.route';
 
 const databaseUrl = process.env.DATABASE_URL;
 
@@ -27,6 +27,8 @@ app.use(express.json());
 app.use('/api/auth', authRoutes);
 app.use('/api/media', mediaRoutes);
 app.use('/api/reviews', reviewRoutes);
+app.use('/api/interactions', interactionRoutes);
+app.use('/api/payments', paymentRoutes);
 
 app.get('/', (req: Request, res: Response) => {
   res.send('CineTube Server is running...');
