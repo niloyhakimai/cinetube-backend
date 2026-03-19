@@ -49,6 +49,7 @@ model Media {
   streamingPlatform String[]
   priceType         PriceType @default(FREE)
   streamingLink     String?
+  viewCount         Int       @default(0)
   
   reviews           Review[]
   watchlist         Watchlist[]
