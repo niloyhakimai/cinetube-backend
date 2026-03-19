@@ -1,10 +1,12 @@
 import express from 'express';
-import { createSubscriptionIntent } from '../controllers/subscription.controller';
+import { createSubscriptionIntent, cancelSubscription } from '../controllers/subscription.controller'; // <-- cancelSubscription ইমপোর্ট করো
 import { authenticate } from '../middlewares/auth.middleware';
 
 const router = express.Router();
 
-// Route to initialize the subscription and get the client secret
+// Create route
 router.post('/create-intent', authenticate, createSubscriptionIntent);
+// Cancel route 
+router.post('/cancel', authenticate, cancelSubscription); 
 
 export default router;

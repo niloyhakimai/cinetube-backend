@@ -96,3 +96,46 @@ export const createSubscriptionIntent = async (req: AuthRequest, res: Response):
     res.status(500).json({ message: error.message || 'Failed to create subscription intent' });
   }
 };
+
+export const cancelSubscription = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const userId = req.user.id;
+
+    // 1. Get user from database
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    
+    if (!user || !user.stripeCustomerId) {
+      res.status(404).json({ message: 'No active Stripe customer found.' });
+      return;
+    }
+
+    // 2. Fetch the active subscriptions from Stripe
+    const subscriptions = await stripe.subscriptions.list({
+      customer: user.stripeCustomerId,
+      status: 'active',
+    });
+
+    if (subscriptions.data.length === 0) {
+      res.status(404).json({ message: 'No active subscription found to cancel.' });
+      return;
+    }
+
+    // 3. Cancel the subscription on Stripe (cancels the first active one it finds)
+    const subscriptionId = subscriptions.data[0].id;
+    await stripe.subscriptions.cancel(subscriptionId);
+
+    // 4. Update the database to reflect the cancellation
+    await prisma.user.update({
+      where: { id: userId },
+      data: {
+        subscriptionPlan: 'FREE',
+        subscriptionStatus: 'CANCELED',
+      },
+    });
+
+    res.status(200).json({ message: 'Subscription successfully canceled.' });
+  } catch (error: any) {
+    console.error('Cancel Subscription Error:', error);
+    res.status(500).json({ message: error.message || 'Failed to cancel subscription' });
+  }
+};
