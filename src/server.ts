@@ -9,7 +9,7 @@ import reviewRoutes from './routes/review.route';
 import interactionRoutes from './routes/interaction.route';
 import paymentRoutes from './routes/payment.route';
 import watchlistRoutes from './routes/watchlist.route';
-
+import subscriptionRoutes from './routes/subscription.route';
 
 const databaseUrl = process.env.DATABASE_URL;
 
@@ -32,6 +32,7 @@ app.use('/api/reviews', reviewRoutes);
 app.use('/api/interactions', interactionRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/watchlist', watchlistRoutes);
+app.use('/api/subscriptions', subscriptionRoutes);
 
 app.get('/', (req: Request, res: Response) => {
   res.send('CineTube Server is running...');

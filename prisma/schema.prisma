@@ -14,20 +14,27 @@ enum Role {
 
 // User Model
 model User {
-  id        String   @id @default(uuid())
-  name      String
-  email     String   @unique
-  password  String
-  role      Role     @default(USER)
-  
-  reviews   Review[]
-  comments  Comment[]
-  likes     Like[]
-  watchlist Watchlist[]
-  purchases Purchase[]
+  id                  String      @id @default(uuid())
+  name                String
+  email               String      @unique
+  password            String
+  role                String      @default("USER") // USER, ADMIN
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  // Stripe Subscription Fields
+  stripeCustomerId    String?     @unique
+  subscriptionPlan    String      @default("FREE") // FREE, MONTHLY, YEARLY
+  subscriptionStatus  String      @default("INACTIVE") // ACTIVE, CANCELED, PAST_DUE
+  subscriptionEndDate DateTime?
+
+  // Relations
+  reviews             Review[]
+  comments            Comment[]
+  likes               Like[]
+  watchlist           Watchlist[]
+  purchases           Purchase[]
+
+  createdAt           DateTime    @default(now())
+  updatedAt           DateTime    @updatedAt
 }
 
 // Movie Series And Media

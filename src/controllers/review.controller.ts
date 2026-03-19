@@ -108,3 +108,122 @@ export const approveReview = async (
     res.status(500).json({ message: 'Internal server error' });
   }
 };
+
+
+export const getPendingReviews = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const reviews = await prisma.review.findMany({
+      where: { isApproved: false },
+      include: {
+        user: { select: { name: true, email: true } },
+        media: { select: { title: true } }
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    res.status(200).json({ reviews });
+  } catch (error) {
+    console.error('Error fetching pending reviews:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+
+// Fetch reviews created by the logged-in user
+export const getUserReviews = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const userId = req.user.id;
+    const reviews = await prisma.review.findMany({
+      where: { userId },
+      include: {
+        media: { select: { title: true } }
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    res.status(200).json({ reviews });
+  } catch (error) {
+    console.error('Error fetching user reviews:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+// Delete a review (Only if it belongs to the user and is NOT approved yet)
+export const deleteReview = async (
+  req: AuthRequest<ReviewIdParams>,
+  res: Response,
+): Promise<void> => {
+  try {
+    const reviewId = req.params.id;
+    const userId = req.user.id;
+
+    // Find the review
+    const review = await prisma.review.findUnique({
+      where: { id: reviewId },
+    });
+
+    if (!review) {
+      res.status(404).json({ message: 'Review not found' });
+      return;
+    }
+
+    // Check if the user owns the review
+    if (review.userId !== userId) {
+      res.status(403).json({ message: 'Not authorized to delete this review' });
+      return;
+    }
+
+    // Check if the review is already approved
+    if (review.isApproved) {
+      res.status(400).json({ message: 'Cannot delete an approved review' });
+      return;
+    }
+
+    // Delete the review
+    await prisma.review.delete({
+      where: { id: reviewId },
+    });
+
+    res.status(200).json({ message: 'Review deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting review:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+// Edit an unpublished review
+export const updateReview = async (
+  req: AuthRequest<ReviewIdParams>,
+  res: Response,
+): Promise<void> => {
+  try {
+    const reviewId = req.params.id;
+    const userId = req.user.id;
+    const { rating, content } = req.body;
+
+    const review = await prisma.review.findUnique({ where: { id: reviewId } });
+
+    if (!review) {
+      res.status(404).json({ message: 'Review not found' });
+      return;
+    }
+    if (review.userId !== userId) {
+      res.status(403).json({ message: 'Not authorized' });
+      return;
+    }
+    if (review.isApproved) {
+      res.status(400).json({ message: 'Cannot edit an approved review' });
+      return;
+    }
+
+    const updatedReview = await prisma.review.update({
+      where: { id: reviewId },
+      data: { rating: Number(rating), content },
+    });
+
+    res.status(200).json({ message: 'Review updated successfully', review: updatedReview });
+  } catch (error) {
+    console.error('Error updating review:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
