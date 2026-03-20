@@ -148,7 +148,7 @@ export const getUserReviews = async (req: AuthRequest, res: Response): Promise<v
   }
 };
 
-// Delete a review (Only if it belongs to the user and is NOT approved yet)
+// Delete a review (Admin can delete any, User can delete only their own unapproved ones)
 export const deleteReview = async (
   req: AuthRequest<ReviewIdParams>,
   res: Response,
@@ -156,6 +156,7 @@ export const deleteReview = async (
   try {
     const reviewId = req.params.id;
     const userId = req.user.id;
+    const userRole = req.user.role; 
 
     // Find the review
     const review = await prisma.review.findUnique({
@@ -167,19 +168,23 @@ export const deleteReview = async (
       return;
     }
 
-    // Check if the user owns the review
-    if (review.userId !== userId) {
-      res.status(403).json({ message: 'Not authorized to delete this review' });
-      return;
+    const isAdmin = userRole === 'ADMIN';
+
+    if (!isAdmin) {
+      // Check if the user owns the review
+      if (review.userId !== userId) {
+        res.status(403).json({ message: 'Not authorized to delete this review' });
+        return;
+      }
+
+      // Check if the review is already approved
+      if (review.isApproved) {
+        res.status(400).json({ message: 'Cannot delete an approved review' });
+        return;
+      }
     }
 
-    // Check if the review is already approved
-    if (review.isApproved) {
-      res.status(400).json({ message: 'Cannot delete an approved review' });
-      return;
-    }
-
-    // Delete the review
+    // Delete the review 
     await prisma.review.delete({
       where: { id: reviewId },
     });
@@ -224,6 +229,72 @@ export const updateReview = async (
     res.status(200).json({ message: 'Review updated successfully', review: updatedReview });
   } catch (error) {
     console.error('Error updating review:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+
+// --- TOGGLE LIKE ON A REVIEW ---
+export const toggleLike = async (req: any, res: any): Promise<void> => {
+  try {
+    const reviewId = req.params.id;
+    const userId = req.user?.id; // Auth middleware 
+
+    if (!userId) {
+      return res.status(401).json({ message: 'You must be logged in to like a review.' });
+    }
+
+
+    const existingLike = await prisma.like.findUnique({
+      where: {
+        userId_reviewId: { userId, reviewId }
+      }
+    });
+
+    if (existingLike) {
+  
+      await prisma.like.delete({ where: { id: existingLike.id } });
+      res.status(200).json({ message: 'Review unliked', liked: false });
+    } else {
+
+      await prisma.like.create({ data: { userId, reviewId } });
+      res.status(200).json({ message: 'Review liked', liked: true });
+    }
+  } catch (error) {
+    console.error('Like error:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+// --- ADD A COMMENT TO A REVIEW ---
+export const addComment = async (req: any, res: any): Promise<void> => {
+  try {
+    const reviewId = req.params.id;
+    const userId = req.user?.id; // Auth middleware 
+    const { content } = req.body;
+
+    if (!userId) {
+      return res.status(401).json({ message: 'You must be logged in to comment.' });
+    }
+
+    if (!content || content.trim() === '') {
+      return res.status(400).json({ message: 'Comment cannot be empty.' });
+    }
+
+    const newComment = await prisma.comment.create({
+      data: {
+        content,
+        userId,
+        reviewId
+      },
+      include: {
+        user: { select: { id: true, name: true } } 
+      }
+    });
+
+    res.status(201).json({ message: 'Comment added successfully', comment: newComment });
+  } catch (error) {
+    console.error('Comment error:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
 };

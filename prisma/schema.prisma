@@ -94,7 +94,7 @@ model Comment {
   userId    String
   user      User     @relation(fields: [userId], references: [id])
   reviewId  String
-  review    Review   @relation(fields: [reviewId], references: [id])
+  review    Review   @relation(fields: [reviewId], references: [id], onDelete: Cascade)
   
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -107,7 +107,7 @@ model Like {
   userId    String
   user      User     @relation(fields: [userId], references: [id])
   reviewId  String
-  review    Review   @relation(fields: [reviewId], references: [id])
+  review    Review   @relation(fields: [reviewId], references: [id], onDelete: Cascade)
 
   @@unique([userId, reviewId]) 
 }
@@ -124,18 +124,26 @@ model Watchlist {
   @@unique([userId, mediaId])
 }
 
+enum PurchaseType {
+  BUY
+  RENT
+}
+
 // Payment And subcription Model
 model Purchase {
-  id             String   @id @default(uuid())
-  amount         Float
-  paymentStatus  PaymentStatus @default(PENDING)
+  id            String        @id @default(uuid())
+  amount        Float
+  paymentStatus PaymentStatus @default(PENDING)
   
-  userId         String
-  user           User     @relation(fields: [userId], references: [id])
-  mediaId        String
-  media          Media    @relation(fields: [mediaId], references: [id])
+  purchaseType  PurchaseType  @default(BUY) 
+  expiresAt     DateTime?                    
+  
+  userId        String
+  user          User          @relation(fields: [userId], references: [id])
+  mediaId       String
+  media         Media         @relation(fields: [mediaId], references: [id])
 
-  createdAt      DateTime @default(now())
+  createdAt     DateTime      @default(now())
 }
 
 enum PaymentStatus {

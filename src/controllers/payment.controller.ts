@@ -11,13 +11,13 @@ function getStripeClient(): Stripe {
   }
 
   return new Stripe(stripeSecretKey, {
-    apiVersion: '2026-02-25.clover',
+    apiVersion: '2026-02-25.clover' as any,
   });
 }
 
 export const createPaymentIntent = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { mediaId } = req.body;
+    const { mediaId, purchaseType } = req.body; 
     const userId = req.user.id;
     const stripe = getStripeClient();
 
@@ -35,18 +35,29 @@ export const createPaymentIntent = async (req: AuthRequest, res: Response): Prom
       return;
     }
 
-    const priceAmount = 999; 
+  
+    const type = purchaseType === 'RENT' ? 'RENT' : 'BUY'; 
+    const priceAmount = type === 'RENT' ? 399 : 999; 
+
+  
+    let expiresAt = null;
+    if (type === 'RENT') {
+      expiresAt = new Date();
+      expiresAt.setHours(expiresAt.getHours() + 48);
+    }
 
     const paymentIntent = await stripe.paymentIntents.create({
       amount: priceAmount,
       currency: 'usd',
-      metadata: { userId, mediaId },
+      metadata: { userId, mediaId, purchaseType: type },
     });
 
     const purchase = await prisma.purchase.create({
       data: {
         amount: priceAmount / 100,
         paymentStatus: 'PENDING',
+        purchaseType: type as any, 
+        expiresAt: expiresAt,    
         userId,
         mediaId,
       },
@@ -83,6 +94,30 @@ export const confirmPayment = async (req: AuthRequest, res: Response): Promise<v
     });
   } catch (error) {
     console.error('Error confirming payment:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+
+export const getPurchaseHistory = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const userId = req.user.id;
+    
+    const purchases = await prisma.purchase.findMany({
+      where: { 
+        userId: userId, 
+        paymentStatus: 'COMPLETED' 
+      },
+      include: {
+    
+        media: { select: { id: true, title: true, priceType: true } }
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+
+    res.status(200).json({ purchases });
+  } catch (error) {
+    console.error('History Fetch Error:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
 };

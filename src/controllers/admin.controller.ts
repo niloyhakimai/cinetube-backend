@@ -1,8 +1,5 @@
 import { Response } from 'express';
 import { AuthRequest } from '../middlewares/auth.middleware';
-// import { PrismaClient } from '@prisma/client';
-
-// const prisma = new PrismaClient();
 import { prisma } from '../server';
 
 export const getDashboardStats = async (req: AuthRequest, res: Response): Promise<void> => {
@@ -16,7 +13,7 @@ export const getDashboardStats = async (req: AuthRequest, res: Response): Promis
     // 1. Get overall counts
     const totalUsers = await prisma.user.count();
     const totalMedia = await prisma.media.count();
-    const totalReviews = await prisma.review.count();
+    const totalReviews = await prisma.review.count({ where: { isApproved: true } });
     const pendingReviewCount = await prisma.review.count({ where: { isApproved: false } });
 
     // 2. Get Pending Reviews with User & Media details
@@ -29,38 +26,47 @@ export const getDashboardStats = async (req: AuthRequest, res: Response): Promis
       orderBy: { createdAt: 'desc' }
     });
 
-    // 3. Get Media Stats (Top 5 by views with average rating)
-    const topMedia = await prisma.media.findMany({
-      take: 5,
-      orderBy: { viewCount: 'desc' },
-      include: {
-        reviews: {
-          where: { isApproved: true },
-          select: { rating: true }
-        }
+    // 3. Media Analytics (Aggregated Reports for Top Rated & Most Reviewed)
+    const allMedia = await prisma.media.findMany({
+      include: { 
+        reviews: { 
+          where: { isApproved: true }, 
+          select: { rating: true } 
+        } 
       }
     });
 
-    // Calculate average ratings
-    const mediaStats = topMedia.map((m: any) => {
-      const avgRating = m.reviews.length > 0
-        ? (m.reviews.reduce((acc: number, rev: any) => acc + rev.rating, 0) / m.reviews.length).toFixed(1)
+    // Calculate average ratings and review counts for all media
+    const mediaStats = allMedia.map((m: any) => {
+      const reviewCount = m.reviews.length;
+      const avgRating = reviewCount > 0
+        ? (m.reviews.reduce((acc: number, rev: any) => acc + rev.rating, 0) / reviewCount).toFixed(1)
         : '0.0';
         
       return {
         id: m.id,
         title: m.title,
         type: m.type,
-        viewCount: m.viewCount,
-        reviewCount: m.reviews.length,
-        avgRating
+        viewCount: m.viewCount || 0,
+        reviewCount,
+        avgRating: Number(avgRating)
       };
     });
 
+    // Sort for Most Reviewed (Top 5)
+    const mostReviewed = [...mediaStats].sort((a, b) => b.reviewCount - a.reviewCount).slice(0, 5);
+    
+    // Sort for Top Rated (Top 5)
+    const topRated = [...mediaStats].sort((a, b) => b.avgRating - a.avgRating).slice(0, 5);
+
+    // Send Response
     res.status(200).json({
       stats: { totalUsers, totalMedia, totalReviews, pendingReviewCount },
       pendingReviews,
-      mediaStats
+      reports: {
+        topRated,
+        mostReviewed
+      }
     });
   } catch (error: any) {
     console.error('Admin Dashboard Error:', error);
