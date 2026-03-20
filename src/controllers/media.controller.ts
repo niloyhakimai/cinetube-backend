@@ -17,6 +17,7 @@ export const createMedia = async (req: Request, res: Response): Promise<void> =>
       streamingPlatform,
       priceType,
       streamingLink,
+      isFeatured, 
     } = req.body;
 
     const newMedia = await prisma.media.create({
@@ -30,6 +31,7 @@ export const createMedia = async (req: Request, res: Response): Promise<void> =>
         streamingPlatform,
         priceType,
         streamingLink,
+        isFeatured: isFeatured || false,
       },
     });
 
@@ -245,6 +247,125 @@ export const searchMedia = async (req: Request, res: Response): Promise<void> =>
     });
   } catch (error) {
     console.error('Error searching media:', error);
+    res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+};
+
+// --- NEW FUNCTION FOR HOMEPAGE DATA ---
+export const getHomepageMedia = async (req: Request, res: Response): Promise<void> => {
+  try {
+    // 1. Get Featured Media (for Hero Section - takes only 1)
+    const featuredMediaList = await prisma.media.findMany({
+      where: { isFeatured: true },
+      orderBy: { createdAt: 'desc' },
+      take: 1,
+      include: { reviews: { select: { rating: true } } }
+    });
+
+    let featuredMedia = null;
+    if (featuredMediaList.length > 0) {
+      const m = featuredMediaList[0];
+      const avgRating = m.reviews.length > 0 ? (m.reviews.reduce((a, b) => a + b.rating, 0) / m.reviews.length).toFixed(1) : '0';
+      featuredMedia = { ...m, averageRating: Number(avgRating) };
+    }
+
+    // 2. Get Editor's Picks (For Slider - takes up to 10)
+    const editorsPicksList = await prisma.media.findMany({
+      where: { isFeatured: true },
+      orderBy: { createdAt: 'desc' },
+      take: 10,
+      include: { reviews: { select: { rating: true } } }
+    });
+
+    const editorsPicks = editorsPicksList.map(m => ({
+      ...m, 
+      averageRating: m.reviews.length > 0 ? Number((m.reviews.reduce((a, b) => a + b.rating, 0) / m.reviews.length).toFixed(1)) : 0 
+    }));
+
+    // 3. Get Newly Added (Latest 10 items)
+    const newlyAdded = await prisma.media.findMany({
+      orderBy: { createdAt: 'desc' },
+      take: 10,
+      include: { reviews: { select: { rating: true } } }
+    });
+
+    // 4. Get Top Rated (Highest average rating)
+    const allMedia = await prisma.media.findMany({
+      include: { reviews: { select: { rating: true } } }
+    });
+    
+    const topRated = allMedia
+      .map(m => {
+        const avg = m.reviews.length > 0 ? (m.reviews.reduce((a, b) => a + b.rating, 0) / m.reviews.length) : 0;
+        return { ...m, averageRating: Number(avg.toFixed(1)) };
+      })
+      .sort((a, b) => b.averageRating - a.averageRating)
+      .slice(0, 10); 
+
+    res.status(200).json({
+      featured: featuredMedia,
+      editorsPicks: editorsPicks, 
+      newlyAdded: newlyAdded.map(m => ({ ...m, averageRating: m.reviews?.length > 0 ? Number((m.reviews.reduce((a:any, b:any) => a + b.rating, 0) / m.reviews.length).toFixed(1)) : 0 })),
+      topRated
+    });
+  } catch (error: any) {
+    console.error('Homepage API Error:', error);
+    res.status(500).json({ message: 'Failed to fetch homepage data' });
+  }
+};
+
+// --- GET SINGLE MEDIA DETAILS (WITH REVIEWS & SIMILAR MEDIA) ---
+export const getMediaById = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const id = req.params.id as string;
+
+    const media = await prisma.media.findUnique({
+      where: { id },
+      include: {
+        reviews: {
+          where: { isApproved: true },
+          include: {
+            user: { select: { id: true, name: true, email: true } },
+            likes: true, 
+            comments: {
+              include: { user: { select: { id: true, name: true } } },
+              orderBy: { createdAt: 'desc' }
+            }
+          },
+          orderBy: { createdAt: 'desc' }
+        }
+      }
+    });
+
+    if (!media) {
+      res.status(404).json({ message: 'Media not found' });
+      return;
+    }
+
+   
+    await prisma.media.update({
+      where: { id },
+      data: { viewCount: { increment: 1 } }
+    });
+
+   
+    const similarMediaRaw = await prisma.media.findMany({
+      where: {
+        genre: { hasSome: media.genre }, 
+        id: { not: id } 
+      },
+      take: 10, 
+      include: { reviews: { select: { rating: true } } }
+    });
+
+    const similarMedia = similarMediaRaw.map(m => {
+      const avgRating = m.reviews.length > 0 ? (m.reviews.reduce((a, b) => a + b.rating, 0) / m.reviews.length).toFixed(1) : '0';
+      return { ...m, averageRating: Number(avgRating) };
+    });
+
+    res.status(200).json({ success: true, media, similarMedia });
+  } catch (error) {
+    console.error('Error fetching single media:', error);
     res.status(500).json({ success: false, message: 'Internal server error' });
   }
 };
