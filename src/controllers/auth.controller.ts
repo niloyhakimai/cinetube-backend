@@ -3,6 +3,8 @@ import bcrypt from 'bcrypt';
 import { prisma } from '../server';
 import jwt from 'jsonwebtoken';
 import { OAuth2Client } from 'google-auth-library';
+import { AuthRequest } from '../middlewares/auth.middleware';
+import { serializeUser } from '../utils/serialize-user';
 
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
@@ -34,12 +36,7 @@ export const registerUser = async (req: Request, res: Response): Promise<void> =
 
     res.status(201).json({
       message: 'Account created successfully!',
-      user: {
-        id: newUser.id,
-        name: newUser.name,
-        email: newUser.email,
-        role: newUser.role,
-      },
+      user: serializeUser(newUser),
     });
   } catch (error) {
     res.status(500).json({ message: 'Something went wrong on the server.' });
@@ -77,12 +74,7 @@ export const loginUser = async (req: Request, res: Response): Promise<void> => {
     res.status(200).json({
       message: 'Login successful!',
       token,
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-      },
+      user: serializeUser(user),
     });
   } catch (error) {
     console.error('Login Error:', error);
@@ -136,15 +128,35 @@ export const googleLogin = async (req: Request, res: Response): Promise<void> =>
     res.status(200).json({
       message: 'Google login successful',
       token,
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-      },
+      user: serializeUser(user),
     });
   } catch (error) {
     console.error('Google Login Error:', error);
     res.status(500).json({ message: 'Google login failed' });
+  }
+};
+
+export const getCurrentUser = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+
+    if (!userId) {
+      res.status(401).json({ message: 'Access denied. No user found in token.' });
+      return;
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+    });
+
+    if (!user) {
+      res.status(404).json({ message: 'User not found.' });
+      return;
+    }
+
+    res.status(200).json({ user: serializeUser(user) });
+  } catch (error) {
+    console.error('Get Current User Error:', error);
+    res.status(500).json({ message: 'Internal server error' });
   }
 };

@@ -71,7 +71,14 @@ export const getUserWatchlist = async (req: AuthRequest, res: Response): Promise
       where: { userId },
       include: {
         media: {
-          select: { id: true, title: true, genre: true, releaseYear: true, priceType: true }
+          select: {
+            id: true,
+            title: true,
+            genre: true,
+            releaseYear: true,
+            priceType: true,
+            posterUrl: true,
+          }
         }
       },
       orderBy: { id: 'desc' }

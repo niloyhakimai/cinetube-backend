@@ -2,6 +2,7 @@ import { Response } from 'express';
 import { AuthRequest } from '../middlewares/auth.middleware';
 import prisma from '../prisma/client';
 import Stripe from 'stripe';
+import { serializeUser } from '../utils/serialize-user';
 
 // 1. Force a stable Stripe API version and bypass TypeScript strict check
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {
@@ -137,5 +138,85 @@ export const cancelSubscription = async (req: AuthRequest, res: Response): Promi
   } catch (error: any) {
     console.error('Cancel Subscription Error:', error);
     res.status(500).json({ message: error.message || 'Failed to cancel subscription' });
+  }
+};
+
+export const confirmSubscription = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+    const { planId, subscriptionId } = req.body;
+
+    if (!userId) {
+      res.status(401).json({ message: 'Access denied. No user found in token.' });
+      return;
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+    });
+
+    if (!user) {
+      res.status(404).json({ message: 'User not found.' });
+      return;
+    }
+
+    let plan: 'MONTHLY' | 'YEARLY';
+    let subscriptionEndDate: Date | null = null;
+
+    if (subscriptionId) {
+      if (!user.stripeCustomerId) {
+        res.status(400).json({ message: 'Stripe customer is missing for this user.' });
+        return;
+      }
+
+      const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+      const stripeSubscription = subscription as Stripe.Subscription & {
+        current_period_end?: number;
+      };
+
+      if (stripeSubscription.customer !== user.stripeCustomerId) {
+        res.status(403).json({ message: 'Subscription does not belong to the authenticated user.' });
+        return;
+      }
+
+      if (!['active', 'trialing'].includes(stripeSubscription.status)) {
+        res.status(400).json({
+          message: `Subscription is not active yet. Current status: ${stripeSubscription.status}`,
+        });
+        return;
+      }
+
+      const priceId = stripeSubscription.items.data[0]?.price?.id;
+      plan = priceId === STRIPE_PRICES.yearly ? 'YEARLY' : 'MONTHLY';
+      subscriptionEndDate = stripeSubscription.current_period_end
+        ? new Date(stripeSubscription.current_period_end * 1000)
+        : null;
+    } else {
+      if (planId !== 'monthly' && planId !== 'yearly') {
+        res.status(400).json({ message: 'Invalid plan selected.' });
+        return;
+      }
+
+      plan = planId === 'yearly' ? 'YEARLY' : 'MONTHLY';
+    }
+
+    const updatedUser = await prisma.user.update({
+      where: { id: userId },
+      data: {
+        subscriptionStatus: 'ACTIVE',
+        subscriptionPlan: plan,
+        subscriptionEndDate,
+      },
+    });
+
+    res.status(200).json({
+      message: 'Subscription activated successfully',
+      user: serializeUser(updatedUser),
+    });
+  } catch (error) {
+    console.error('Error confirming subscription:', error);
+    res.status(500).json({
+      message: error instanceof Error ? error.message : 'Internal server error',
+    });
   }
 };

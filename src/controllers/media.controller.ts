@@ -1,5 +1,8 @@
 import { Request, Response } from 'express';
 import { prisma } from '../server';
+import { refreshStoredTmdbMedia } from '../services/tmdb.service';
+import { AuthRequest } from '../middlewares/auth.middleware';
+import { protectMediaForViewer } from '../utils/media-access';
 
 type MediaParams = {
   id: string;
@@ -17,6 +20,7 @@ export const createMedia = async (req: Request, res: Response): Promise<void> =>
       streamingPlatform,
       priceType,
       streamingLink,
+      posterUrl,
       isFeatured, 
     } = req.body;
 
@@ -31,7 +35,8 @@ export const createMedia = async (req: Request, res: Response): Promise<void> =>
         streamingPlatform,
         priceType,
         streamingLink,
-        isFeatured: isFeatured || false,
+        posterUrl: typeof posterUrl === 'string' && posterUrl.trim() ? posterUrl.trim() : null,
+        isFeatured: typeof isFeatured === 'boolean' ? isFeatured : false,
       },
     });
 
@@ -47,7 +52,10 @@ export const createMedia = async (req: Request, res: Response): Promise<void> =>
 
 export const getAllMedia = async (req: Request, res: Response): Promise<void> => {
   try {
+    const source = typeof req.query.source === 'string' ? req.query.source.toUpperCase() : '';
+
     const mediaList = await prisma.media.findMany({
+      where: source === 'MANUAL' || source === 'TMDB' ? { source: source as 'MANUAL' | 'TMDB' } : undefined,
       orderBy: { createdAt: 'desc' },
     });
     
@@ -62,7 +70,36 @@ export const getAllMedia = async (req: Request, res: Response): Promise<void> =>
 export const updateMedia = async (req: Request<MediaParams>, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
-    const updateData = req.body;
+    const {
+      title,
+      synopsis,
+      genre,
+      releaseYear,
+      director,
+      cast,
+      streamingPlatform,
+      priceType,
+      streamingLink,
+      posterUrl,
+      isFeatured,
+    } = req.body;
+
+    const updateData = {
+      title,
+      synopsis,
+      genre,
+      releaseYear,
+      director,
+      cast,
+      streamingPlatform,
+      priceType,
+      streamingLink,
+      posterUrl:
+        typeof posterUrl === 'string'
+          ? (posterUrl.trim() || null)
+          : undefined,
+      isFeatured: typeof isFeatured === 'boolean' ? isFeatured : undefined,
+    };
 
     const updatedMedia = await prisma.media.update({
       where: { id },
@@ -315,9 +352,39 @@ export const getHomepageMedia = async (req: Request, res: Response): Promise<voi
 };
 
 // --- GET SINGLE MEDIA DETAILS (WITH REVIEWS & SIMILAR MEDIA) ---
-export const getMediaById = async (req: Request, res: Response): Promise<void> => {
+export const getMediaById = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const id = req.params.id as string;
+
+    const mediaSource = await prisma.media.findUnique({
+      where: { id },
+      select: { id: true, tmdbId: true },
+    });
+
+    if (!mediaSource) {
+      res.status(404).json({ message: 'Media not found' });
+      return;
+    }
+
+    if (mediaSource.tmdbId) {
+      const refreshedMedia = await refreshStoredTmdbMedia(id);
+
+      if (refreshedMedia) {
+        const media = await protectMediaForViewer(req.user?.id, refreshedMedia.media);
+
+        await prisma.media.update({
+          where: { id },
+          data: { viewCount: { increment: 1 } },
+        });
+
+        res.status(200).json({
+          success: true,
+          media,
+          similarMedia: refreshedMedia.similarMedia,
+        });
+        return;
+      }
+    }
 
     const media = await prisma.media.findUnique({
       where: { id },
@@ -363,7 +430,9 @@ export const getMediaById = async (req: Request, res: Response): Promise<void> =
       return { ...m, averageRating: Number(avgRating) };
     });
 
-    res.status(200).json({ success: true, media, similarMedia });
+    const protectedMedia = await protectMediaForViewer(req.user?.id, media);
+
+    res.status(200).json({ success: true, media: protectedMedia, similarMedia });
   } catch (error) {
     console.error('Error fetching single media:', error);
     res.status(500).json({ success: false, message: 'Internal server error' });

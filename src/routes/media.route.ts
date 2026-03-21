@@ -1,6 +1,6 @@
 import express from 'express';
 import { createMedia, getAllMedia, updateMedia, deleteMedia, searchMedia,getHomepageMedia, getMediaById } from '../controllers/media.controller';
-import { authenticate, isAdmin } from '../middlewares/auth.middleware';
+import { attachUserIfPresent, authenticate, isAdmin } from '../middlewares/auth.middleware';
 
 const router = express.Router();
 
@@ -16,6 +16,6 @@ router.get('/home', getHomepageMedia);
 
 router.put('/:id', authenticate, isAdmin, updateMedia);
 router.delete('/:id', authenticate, isAdmin, deleteMedia);
-router.get('/:id', getMediaById);
+router.get('/:id', attachUserIfPresent, getMediaById);
 
 export default router;

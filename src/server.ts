@@ -11,6 +11,7 @@ import paymentRoutes from './routes/payment.route';
 import watchlistRoutes from './routes/watchlist.route';
 import subscriptionRoutes from './routes/subscription.route';
 import adminRoutes from './routes/admin.route';
+import tmdbRoutes from './routes/tmdb.route';
 import Stripe from 'stripe';
 import { sendPremiumWelcomeEmail } from './utils/email';
 
@@ -93,6 +94,7 @@ app.use('/api/payments', paymentRoutes);
 app.use('/api/watchlist', watchlistRoutes);
 app.use('/api/subscriptions', subscriptionRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/tmdb', tmdbRoutes);
 
 app.get('/', (req: Request, res: Response) => {
   res.send('CineTube Server is running...');

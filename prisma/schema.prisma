@@ -49,6 +49,11 @@ model Media {
   streamingPlatform String[]
   priceType         PriceType @default(FREE)
   streamingLink     String?
+  posterUrl         String?
+  backdropUrl       String?
+  tmdbId            Int?
+  mediaType         MediaType  @default(MOVIE)
+  source            MediaSource @default(MANUAL)
   viewCount         Int       @default(0)
   isFeatured        Boolean   @default(false) 
   
@@ -58,11 +63,23 @@ model Media {
 
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
+
+  @@unique([tmdbId, mediaType])
 }
 
 enum PriceType {
   FREE
   PREMIUM
+}
+
+enum MediaType {
+  MOVIE
+  TV
+}
+
+enum MediaSource {
+  MANUAL
+  TMDB
 }
 
 // Review Model

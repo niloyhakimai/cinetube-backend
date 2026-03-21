@@ -30,6 +30,25 @@ export const authenticate = (req: AuthRequest, res: Response, next: NextFunction
   }
 };
 
+export const attachUserIfPresent = (req: AuthRequest, res: Response, next: NextFunction): void => {
+  const authHeader = req.header('Authorization');
+  const token = authHeader?.split(' ')[1];
+
+  if (!token) {
+    next();
+    return;
+  }
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET as string);
+    req.user = decoded;
+  } catch (error) {
+    req.user = undefined;
+  }
+
+  next();
+};
+
 export const isAdmin = (req: AuthRequest, res: Response, next: NextFunction): void => {
   if (req.user && req.user.role === 'ADMIN') {
     next();

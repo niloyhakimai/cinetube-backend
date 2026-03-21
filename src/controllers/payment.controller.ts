@@ -110,7 +110,7 @@ export const getPurchaseHistory = async (req: AuthRequest, res: Response): Promi
       },
       include: {
     
-        media: { select: { id: true, title: true, priceType: true } }
+        media: { select: { id: true, title: true, priceType: true, posterUrl: true } }
       },
       orderBy: { createdAt: 'desc' }
     });
