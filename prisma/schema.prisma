@@ -25,6 +25,8 @@ model User {
   subscriptionPlan    String      @default("FREE") // FREE, MONTHLY, YEARLY
   subscriptionStatus  String      @default("INACTIVE") // ACTIVE, CANCELED, PAST_DUE
   subscriptionEndDate DateTime?
+  passwordResetToken  String?     @unique
+  passwordResetExpires DateTime?
 
   // Relations
   reviews             Review[]

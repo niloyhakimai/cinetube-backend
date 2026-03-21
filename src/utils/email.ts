@@ -32,3 +32,35 @@ export const sendPremiumWelcomeEmail = async (to: string, userName: string, plan
 
   return transporter.sendMail(mailOptions);
 };
+
+export const sendPasswordResetEmail = async (to: string, userName: string, resetUrl: string) => {
+  const mailOptions = {
+    from: `"CineTube Support" <${process.env.EMAIL_USER}>`,
+    to,
+    subject: 'Reset your CineTube password',
+    html: `
+      <div style="font-family: Arial, sans-serif; background-color: #050505; color: white; padding: 40px; border-radius: 10px;">
+        <h1 style="color: #e50914;">Reset your password</h1>
+        <p style="font-size: 16px;">Hi ${userName},</p>
+        <p style="font-size: 16px; line-height: 1.6;">
+          We received a request to reset your CineTube password. Click the button below to choose a new password.
+        </p>
+        <a
+          href="${resetUrl}"
+          style="background-color: #e50914; color: white; padding: 12px 25px; text-decoration: none; border-radius: 5px; font-weight: bold; display: inline-block; margin-top: 20px;"
+        >
+          Reset Password
+        </a>
+        <p style="margin-top: 24px; font-size: 14px; line-height: 1.6; color: #c9c9c9;">
+          This link will expire in 1 hour. If you did not request a password reset, you can safely ignore this email.
+        </p>
+        <p style="margin-top: 16px; font-size: 12px; color: #777;">
+          If the button does not work, copy and paste this URL into your browser:<br />
+          <span style="color: #fff;">${resetUrl}</span>
+        </p>
+      </div>
+    `,
+  };
+
+  return transporter.sendMail(mailOptions);
+};
