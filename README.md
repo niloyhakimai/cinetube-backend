@@ -6,8 +6,8 @@ This repository contains the **Backend API** for CineTube, a full-stack movie an
 
 ## 🚀 Live API
 
-- 🌐 **API Base URL:** https://cinetube-backend.onrender.com/api  
-- 🎬 **Frontend Repository:** https://github.com/niloyhakimai/cinetube-frontend  
+- 🌐 **API Base URL:** [onrender.com/api](https://cinetube-backend.onrender.com/api)  
+- 🎬 **Frontend Repo:** [cinetube-frontend](https://github.com/niloyhakimai/cinetube-frontend)  
 
 ---
 
