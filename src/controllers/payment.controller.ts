@@ -1,6 +1,6 @@
 import { Response } from 'express';
 import Stripe from 'stripe';
-import { prisma } from '../server';
+import prisma from '../prisma/client';
 import { AuthRequest } from '../middlewares/auth.middleware';
 
 function getStripeClient(): Stripe {
@@ -17,7 +17,7 @@ function getStripeClient(): Stripe {
 
 export const createPaymentIntent = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { mediaId, purchaseType } = req.body; 
+    const { mediaId, purchaseType } = req.body;
     const userId = req.user.id;
     const stripe = getStripeClient();
 
@@ -35,11 +35,9 @@ export const createPaymentIntent = async (req: AuthRequest, res: Response): Prom
       return;
     }
 
-  
-    const type = purchaseType === 'RENT' ? 'RENT' : 'BUY'; 
-    const priceAmount = type === 'RENT' ? 399 : 999; 
+    const type = purchaseType === 'RENT' ? 'RENT' : 'BUY';
+    const priceAmount = type === 'RENT' ? 399 : 999;
 
-  
     let expiresAt = null;
     if (type === 'RENT') {
       expiresAt = new Date();
@@ -56,8 +54,8 @@ export const createPaymentIntent = async (req: AuthRequest, res: Response): Prom
       data: {
         amount: priceAmount / 100,
         paymentStatus: 'PENDING',
-        purchaseType: type as any, 
-        expiresAt: expiresAt,    
+        purchaseType: type,
+        expiresAt,
         userId,
         mediaId,
       },
@@ -98,24 +96,55 @@ export const confirmPayment = async (req: AuthRequest, res: Response): Promise<v
   }
 };
 
-
 export const getPurchaseHistory = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const userId = req.user.id;
-    
-    const purchases = await prisma.purchase.findMany({
-      where: { 
-        userId: userId, 
-        paymentStatus: 'COMPLETED' 
-      },
-      include: {
-    
-        media: { select: { id: true, title: true, priceType: true, posterUrl: true } }
-      },
-      orderBy: { createdAt: 'desc' }
-    });
 
-    res.status(200).json({ purchases });
+    const [purchases, subscriptionPayments] = await Promise.all([
+      prisma.purchase.findMany({
+        where: {
+          userId,
+          paymentStatus: 'COMPLETED',
+        },
+        include: {
+          media: { select: { id: true, title: true, priceType: true, posterUrl: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+      }),
+      prisma.subscriptionPayment.findMany({
+        where: {
+          userId,
+          paymentStatus: 'COMPLETED',
+        },
+        orderBy: { createdAt: 'desc' },
+      }),
+    ]);
+
+    const history = [
+      ...purchases.map((purchase) => ({
+        id: purchase.id,
+        entryType: 'MOVIE_PURCHASE' as const,
+        amount: purchase.amount,
+        paymentStatus: purchase.paymentStatus,
+        createdAt: purchase.createdAt,
+        purchaseType: purchase.purchaseType,
+        expiresAt: purchase.expiresAt,
+        media: purchase.media,
+      })),
+      ...subscriptionPayments.map((subscriptionPayment) => ({
+        id: subscriptionPayment.id,
+        entryType: 'SUBSCRIPTION_PAYMENT' as const,
+        amount: subscriptionPayment.amount,
+        paymentStatus: subscriptionPayment.paymentStatus,
+        createdAt: subscriptionPayment.createdAt,
+        plan: subscriptionPayment.plan,
+        currency: subscriptionPayment.currency,
+        billingPeriodStart: subscriptionPayment.billingPeriodStart,
+        billingPeriodEnd: subscriptionPayment.billingPeriodEnd,
+      })),
+    ].sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime());
+
+    res.status(200).json({ purchases, subscriptionPayments, history });
   } catch (error) {
     console.error('History Fetch Error:', error);
     res.status(500).json({ message: 'Internal server error' });
