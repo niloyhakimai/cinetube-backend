@@ -34,6 +34,30 @@ export const getReviewSummary = async (req: AuthRequest, res: Response): Promise
 export const postAiChat = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const message = typeof req.body?.message === 'string' ? req.body.message.trim() : '';
+    const excludeMediaIds = Array.isArray(req.body?.excludeMediaIds)
+      ? req.body.excludeMediaIds
+          .filter((entry: unknown): entry is string => typeof entry === 'string' && entry.trim().length > 0)
+          .slice(-12)
+      : [];
+    const excludeTitles = Array.isArray(req.body?.excludeTitles)
+      ? req.body.excludeTitles
+          .filter((entry: unknown): entry is string => typeof entry === 'string' && entry.trim().length > 0)
+          .slice(-20)
+      : [];
+    const history = Array.isArray(req.body?.history)
+      ? req.body.history
+          .filter((entry: unknown): entry is { role: 'user' | 'assistant'; text: string } => {
+            return Boolean(
+              entry &&
+              typeof entry === 'object' &&
+              'role' in entry &&
+              'text' in entry &&
+              ((entry as { role?: string }).role === 'user' || (entry as { role?: string }).role === 'assistant') &&
+              typeof (entry as { text?: unknown }).text === 'string',
+            );
+          })
+          .slice(-6)
+      : [];
 
     if (!message) {
       res.status(400).json({ message: 'Message is required.' });
@@ -43,6 +67,9 @@ export const postAiChat = async (req: AuthRequest, res: Response): Promise<void>
     const response = await getAiChatResponse({
       message,
       userId: req.user?.id,
+      history,
+      excludeMediaIds,
+      excludeTitles,
       context: req.body?.context,
     });
 

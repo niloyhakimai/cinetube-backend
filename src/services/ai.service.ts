@@ -3,6 +3,33 @@ import { SUBSCRIPTION_AMOUNT_BY_PLAN } from '../constants/subscription';
 import { completeWithGroq, groqIsConfigured } from './ai-provider.service';
 
 type ReplyStyle = 'english' | 'bangla' | 'banglish';
+type ChatHistoryEntry = {
+  role: 'user' | 'assistant';
+  text: string;
+};
+
+type RecommendationOptions = {
+  preferredGenres?: string[];
+  preferredMediaType?: 'MOVIE' | 'TV';
+  pricePreference?: 'FREE' | 'PREMIUM';
+  excludeMediaIds?: string[];
+  excludeTitles?: string[];
+};
+
+const GENRE_INTENTS = [
+  { aliases: ['action', 'fight', 'explosion'], targets: ['Action'] },
+  { aliases: ['adventure', 'journey'], targets: ['Adventure'] },
+  { aliases: ['animation', 'animated', 'cartoon'], targets: ['Animation'] },
+  { aliases: ['comedy', 'funny', 'laugh'], targets: ['Comedy'] },
+  { aliases: ['crime', 'gangster', 'detective'], targets: ['Crime'] },
+  { aliases: ['drama', 'emotional'], targets: ['Drama'] },
+  { aliases: ['fantasy', 'magic'], targets: ['Fantasy'] },
+  { aliases: ['horror', 'scary', 'ghost', 'haunted', 'creepy'], targets: ['Horror', 'Thriller'] },
+  { aliases: ['mystery', 'detective'], targets: ['Mystery', 'Thriller'] },
+  { aliases: ['romance', 'romantic', 'love'], targets: ['Romance', 'Drama'] },
+  { aliases: ['sci-fi', 'scifi', 'science fiction', 'space', 'future', 'futuristic'], targets: ['Sci-Fi', 'Science Fiction'] },
+  { aliases: ['thriller', 'suspense', 'tense'], targets: ['Thriller', 'Mystery'] },
+];
 
 function detectReplyStyle(message: string): ReplyStyle {
   if (/[\u0980-\u09FF]/.test(message)) {
@@ -20,8 +47,79 @@ function localizeText(style: ReplyStyle, variants: { english: string; bangla: st
   return variants[style];
 }
 
+function normalizeToken(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
 function formatGenreMap(entries: string[]): string {
   return entries.slice(0, 3).join(', ');
+}
+
+function extractRecommendationIntent(message: string): RecommendationOptions {
+  const lower = message.toLowerCase();
+  const genreMatches = new Set<string>();
+
+  GENRE_INTENTS.forEach((intent) => {
+    if (intent.aliases.some((alias) => lower.includes(alias))) {
+      intent.targets.forEach((target) => genreMatches.add(target));
+    }
+  });
+
+  let preferredMediaType: 'MOVIE' | 'TV' | undefined;
+  if (/\b(series|show|shows|tv|tv series)\b/i.test(message)) {
+    preferredMediaType = 'TV';
+  } else if (/\b(movie|movies|film|cinema)\b/i.test(message)) {
+    preferredMediaType = 'MOVIE';
+  }
+
+  let pricePreference: 'FREE' | 'PREMIUM' | undefined;
+  if (/\b(free|without premium|no premium|free watch)\b/i.test(message)) {
+    pricePreference = 'FREE';
+  } else if (/\b(premium|subscription|subscriber)\b/i.test(message)) {
+    pricePreference = 'PREMIUM';
+  }
+
+  return {
+    preferredGenres: [...genreMatches],
+    preferredMediaType,
+    pricePreference,
+  };
+}
+
+function isFollowUpPrompt(message: string): boolean {
+  return /^(another|more|else|different|one more|same vibe|same genre|same type|next one|arekta|aro|onnota)\b/i.test(message.trim());
+}
+
+function buildEffectivePrompt(message: string, history: ChatHistoryEntry[] = []): string {
+  if (!isFollowUpPrompt(message)) {
+    return message;
+  }
+
+  const lastUserPrompt = [...history]
+    .reverse()
+    .find((entry) => entry.role === 'user' && entry.text.trim().length > 0)?.text;
+
+  if (!lastUserPrompt) {
+    return message;
+  }
+
+  return `${lastUserPrompt}\nFollow-up request: ${message}`;
+}
+
+function buildSuggestionRoutes(options: RecommendationOptions) {
+  const routes = ['/explore'];
+
+  if (options.preferredMediaType === 'TV') {
+    routes.push('/series');
+  } else {
+    routes.push('/movies');
+  }
+
+  if (options.pricePreference === 'PREMIUM') {
+    routes.push('/#pricing');
+  }
+
+  return [...new Set(routes)].slice(0, 3);
 }
 
 async function getUserPreferenceSignals(userId: string) {
@@ -94,9 +192,11 @@ function summarizeTaste(preferences: Map<string, number>): string[] {
     .map(([genre]) => genre);
 }
 
-export async function getAiRecommendations(userId?: string, limit = 12) {
+export async function getAiRecommendations(userId?: string, limit = 12, options: RecommendationOptions = {}) {
   const signals = userId ? await getUserPreferenceSignals(userId) : null;
   const user = signals?.user;
+  const excludedIds = new Set(options.excludeMediaIds || []);
+  const excludedTitles = new Set((options.excludeTitles || []).map(normalizeToken).filter(Boolean));
 
   const media = await prisma.media.findMany({
     include: {
@@ -109,6 +209,8 @@ export async function getAiRecommendations(userId?: string, limit = 12) {
 
   const scoredItems = media
     .filter((item) => !signals?.excludedMediaIds.has(item.id))
+    .filter((item) => !excludedIds.has(item.id))
+    .filter((item) => !excludedTitles.has(normalizeToken(item.title)))
     .map((item) => {
       const reviewCount = item.reviews.length;
       const averageRating = reviewCount > 0
@@ -116,6 +218,10 @@ export async function getAiRecommendations(userId?: string, limit = 12) {
         : 0;
 
       let score = averageRating * 3 + Math.min(item.viewCount, 1000) / 30;
+      const normalizedItemGenres = item.genre.map(normalizeToken);
+      const matchesPreferredGenre = Boolean(options.preferredGenres?.some((genre) => normalizedItemGenres.includes(normalizeToken(genre))));
+      const matchesPreferredMediaType = options.preferredMediaType ? item.mediaType === options.preferredMediaType : false;
+      const matchesPricePreference = options.pricePreference ? item.priceType === options.pricePreference : false;
 
       if (item.isFeatured) {
         score += 5;
@@ -130,6 +236,20 @@ export async function getAiRecommendations(userId?: string, limit = 12) {
         score -= 4;
       }
 
+      if (matchesPreferredGenre) {
+        score += 8;
+      }
+
+      if (options.preferredMediaType) {
+        score += matchesPreferredMediaType ? 4 : -3;
+      }
+
+      if (options.pricePreference === 'FREE') {
+        score += item.priceType === 'FREE' ? 4 : -5;
+      } else if (options.pricePreference === 'PREMIUM' && item.priceType === 'PREMIUM') {
+        score += 2;
+      }
+
       return {
         id: item.id,
         href: `/movies/${item.id}`,
@@ -141,20 +261,51 @@ export async function getAiRecommendations(userId?: string, limit = 12) {
         priceType: item.priceType,
         mediaType: item.mediaType,
         score,
+        matchesPreferredGenre,
+        matchesPreferredMediaType,
+        matchesPricePreference,
       };
     })
-    .sort((left, right) => right.score - left.score)
-    .slice(0, limit);
+    .sort((left, right) => right.score - left.score);
+
+  let rankedItems = [...scoredItems];
+
+  if (options.preferredGenres?.length && rankedItems.some((item) => item.matchesPreferredGenre)) {
+    rankedItems = rankedItems.filter((item) => item.matchesPreferredGenre);
+  }
+
+  if (options.preferredMediaType && rankedItems.some((item) => item.matchesPreferredMediaType)) {
+    rankedItems = rankedItems.filter((item) => item.matchesPreferredMediaType);
+  }
+
+  if (options.pricePreference && rankedItems.some((item) => item.matchesPricePreference)) {
+    rankedItems = rankedItems.filter((item) => item.matchesPricePreference);
+  }
+
+  const seenTitles = new Set<string>();
+  rankedItems = rankedItems.filter((item) => {
+    const titleKey = normalizeToken(item.title);
+
+    if (seenTitles.has(titleKey)) {
+      return false;
+    }
+
+    seenTitles.add(titleKey);
+    return true;
+  });
+
+  const limitedItems = rankedItems.slice(0, limit);
 
   const favoriteGenres = summarizeTaste(signals?.positiveGenres || new Map<string, number>());
+  const requestedGenres = options.preferredGenres?.length ? options.preferredGenres : favoriteGenres;
   const fallbackHeadline = user
-    ? favoriteGenres.length > 0
-      ? `Because you enjoy ${formatGenreMap(favoriteGenres)}`
+    ? requestedGenres.length > 0
+      ? `Because you enjoy ${formatGenreMap(requestedGenres)}`
       : 'Fresh picks based on your CineTube activity'
     : 'Popular picks for movie night';
   const fallbackSummary = user
-    ? favoriteGenres.length > 0
-      ? `We blended your watchlist, ratings, and saved genres to surface ${formatGenreMap(favoriteGenres)} titles first.`
+    ? requestedGenres.length > 0
+      ? `We blended your watchlist, ratings, and saved genres to surface ${formatGenreMap(requestedGenres)} titles first.`
       : 'We used your recent activity to surface a balanced mix of crowd favorites and featured titles.'
     : 'These picks lean on ratings, popularity, and featured titles so guests still get strong discovery results.';
 
@@ -162,7 +313,7 @@ export async function getAiRecommendations(userId?: string, limit = 12) {
   let summary = fallbackSummary;
   let source: 'groq' | 'fallback' = 'fallback';
 
-  if (groqIsConfigured() && scoredItems.length > 0) {
+  if (groqIsConfigured() && limitedItems.length > 0) {
     const groqResult = await completeWithGroq([
       {
         role: 'system',
@@ -170,7 +321,7 @@ export async function getAiRecommendations(userId?: string, limit = 12) {
       },
       {
         role: 'user',
-        content: `User favorite genres: ${favoriteGenres.join(', ') || 'None'}\nTitles:\n${scoredItems
+        content: `User requested genres: ${requestedGenres.join(', ') || 'None'}\nTitles:\n${limitedItems
           .slice(0, 5)
           .map((item) => `${item.title} (${item.releaseYear}) - ${item.genre.join(', ')}`)
           .join('\n')}`,
@@ -189,11 +340,22 @@ export async function getAiRecommendations(userId?: string, limit = 12) {
     }
   }
 
+  const publicItems = limitedItems.map((item) => {
+    const {
+      matchesPreferredGenre,
+      matchesPreferredMediaType,
+      matchesPricePreference,
+      ...publicItem
+    } = item;
+
+    return publicItem;
+  });
+
   return {
     source,
     headline,
     summary,
-    items: scoredItems,
+    items: publicItems,
   };
 }
 
@@ -333,6 +495,9 @@ function getNavigationHelp(style: ReplyStyle) {
 export async function getAiChatResponse(input: {
   message: string;
   userId?: string;
+  history?: ChatHistoryEntry[];
+  excludeMediaIds?: string[];
+  excludeTitles?: string[];
   context?: {
     pathname?: string;
     mediaId?: string;
@@ -341,7 +506,10 @@ export async function getAiChatResponse(input: {
 }) {
   const style = detectReplyStyle(input.message);
   const message = input.message.trim();
-  const lower = message.toLowerCase();
+  const effectivePrompt = buildEffectivePrompt(message, input.history);
+  const lower = effectivePrompt.toLowerCase();
+  const intent = extractRecommendationIntent(effectivePrompt);
+  const suggestionRoutes = buildSuggestionRoutes(intent);
 
   if (/plan|price|pricing|subscription|premium/.test(lower)) {
     return {
@@ -384,7 +552,11 @@ export async function getAiChatResponse(input: {
     };
   }
 
-  const recommendationBundle = await getAiRecommendations(input.userId, 6);
+  const recommendationBundle = await getAiRecommendations(input.userId, 6, {
+    ...intent,
+    excludeMediaIds: input.excludeMediaIds,
+    excludeTitles: input.excludeTitles,
+  });
   const topGenres = recommendationBundle.items[0]?.genre?.slice(0, 2).join(', ') || 'popular genres';
   const fallbackMessage = localizeText(style, {
     english: `I picked a fresh watchlist for you around ${topGenres}. ${recommendationBundle.summary}`,
@@ -399,11 +571,14 @@ export async function getAiChatResponse(input: {
     const groqResult = await completeWithGroq([
       {
         role: 'system',
-        content: `You are a concise streaming assistant. Reply in ${style}. Keep it warm and under 90 words.`,
+        content: `You are a concise streaming assistant. Reply in ${style}. Keep it warm, accurate to the user's taste, and under 90 words.`,
       },
       {
         role: 'user',
         content: `User asked: ${message}
+Effective preference: ${effectivePrompt}
+Recent conversation:
+${input.history?.slice(-4).map((entry) => `${entry.role}: ${entry.text}`).join('\n') || 'None'}
 Homepage summary: ${recommendationBundle.summary}
 Recommendation titles: ${recommendationBundle.items.map((item) => `${item.title} (${item.releaseYear})`).join(', ')}`,
       },
@@ -418,7 +593,7 @@ Recommendation titles: ${recommendationBundle.items.map((item) => `${item.title}
   return {
     source,
     message: finalMessage,
-    suggestions: ['/explore', '/movies', '/#pricing'],
+    suggestions: suggestionRoutes,
     recommendations: recommendationBundle.items,
     reviewSummary: null,
   };

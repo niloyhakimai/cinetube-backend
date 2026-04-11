@@ -66,6 +66,7 @@ export interface TmdbCatalogItem {
   averageRating: number;
   voteCount: number;
   popularity: number;
+  previewLink?: string | null;
 }
 
 export interface TmdbCatalogResponse {
@@ -274,8 +275,28 @@ async function normalizeCatalogItems(
       averageRating: Number((item.vote_average || 0).toFixed(1)),
       voteCount: item.vote_count || 0,
       popularity: item.popularity || 0,
+      previewLink: null,
     };
   });
+}
+
+async function attachPreviewLinks(items: TmdbCatalogItem[]): Promise<TmdbCatalogItem[]> {
+  const previewLinks = await Promise.all(
+    items.map(async (item) => {
+      try {
+        const externalMediaType: ExternalMediaType = item.mediaType === 'TV' ? 'tv' : 'movie';
+        const videos = await fetchTmdbJson<TmdbVideosResponse>(`${externalMediaType}/${item.tmdbId}/videos`);
+        return getPreferredTrailerUrl(videos);
+      } catch (error) {
+        return null;
+      }
+    }),
+  );
+
+  return items.map((item, index) => ({
+    ...item,
+    previewLink: previewLinks[index] || item.previewLink || null,
+  }));
 }
 
 async function fetchCatalogPage(
@@ -463,9 +484,14 @@ export async function getTmdbHomeFeed() {
     await normalizeCatalogItems(trendingSeries.results || [], 'tv'),
     { sort: 'popularity' },
   );
+  const heroBaseItems = [...popularMovies.results.slice(0, 4), ...normalizedTrendingSeries.slice(0, 4)].slice(0, 5);
+  const heroSlides = (await attachPreviewLinks(heroBaseItems)).sort((left, right) => {
+    return Number(Boolean(right.previewLink)) - Number(Boolean(left.previewLink));
+  });
 
   return {
-    featured: popularMovies.results[0] || normalizedTrendingSeries[0] || null,
+    featured: heroSlides[0] || popularMovies.results[0] || normalizedTrendingSeries[0] || null,
+    heroSlides,
     popularMovies: popularMovies.results.slice(0, 12),
     trendingSeries: normalizedTrendingSeries.slice(0, 12),
   };
