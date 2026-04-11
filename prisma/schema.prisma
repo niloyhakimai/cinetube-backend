@@ -10,6 +10,8 @@ datasource db {
 enum Role {
   USER
   ADMIN
+  MODERATOR
+  CURATOR
 }
 
 // User Model
@@ -18,7 +20,10 @@ model User {
   name                String
   email               String      @unique
   password            String
-  role                String      @default("USER") // USER, ADMIN
+  role                Role        @default(USER)
+  avatarUrl           String?
+  favoriteGenres      String[]    @default([])
+  communicationOptIn  Boolean     @default(true)
 
   // Stripe Subscription Fields
   stripeCustomerId    String?     @unique

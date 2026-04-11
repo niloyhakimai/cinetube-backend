@@ -18,7 +18,7 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {
 
 export const createSubscriptionIntent = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const userId = req.user.id;
+    const userId = req.user!.id;
     const { planId } = req.body;
 
     if (!getSubscriptionPlanFromPlanId(planId)) {
@@ -102,7 +102,7 @@ export const createSubscriptionIntent = async (req: AuthRequest, res: Response):
 
 export const cancelSubscription = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const userId = req.user.id;
+    const userId = req.user!.id;
 
     // 1. Get user from database
     const user = await prisma.user.findUnique({ where: { id: userId } });

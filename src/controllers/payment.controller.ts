@@ -18,7 +18,7 @@ function getStripeClient(): Stripe {
 export const createPaymentIntent = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { mediaId, purchaseType } = req.body;
-    const userId = req.user.id;
+    const userId = req.user!.id;
     const stripe = getStripeClient();
 
     const media = await prisma.media.findUnique({
@@ -98,7 +98,7 @@ export const confirmPayment = async (req: AuthRequest, res: Response): Promise<v
 
 export const getPurchaseHistory = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const userId = req.user.id;
+    const userId = req.user!.id;
 
     const [purchases, subscriptionPayments] = await Promise.all([
       prisma.purchase.findMany({

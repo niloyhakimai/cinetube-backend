@@ -14,7 +14,7 @@ type ReviewIdParams = {
 export const createReview = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { rating, content, tags, isSpoiler, mediaId } = req.body;
-    const userId = req.user.id;
+    const userId = req.user!.id;
 
     if (!mediaId || typeof mediaId !== 'string') {
       res.status(400).json({ message: 'A valid mediaId is required.' });
@@ -132,7 +132,7 @@ export const getPendingReviews = async (req: AuthRequest, res: Response): Promis
 // Fetch reviews created by the logged-in user
 export const getUserReviews = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const userId = req.user.id;
+    const userId = req.user!.id;
     const reviews = await prisma.review.findMany({
       where: { userId },
       include: {
@@ -155,8 +155,8 @@ export const deleteReview = async (
 ): Promise<void> => {
   try {
     const reviewId = req.params.id;
-    const userId = req.user.id;
-    const userRole = req.user.role; 
+    const userId = req.user!.id;
+    const userRole = req.user!.role; 
 
     // Find the review
     const review = await prisma.review.findUnique({
@@ -168,7 +168,7 @@ export const deleteReview = async (
       return;
     }
 
-    const isAdmin = userRole === 'ADMIN';
+    const isAdmin = userRole === 'ADMIN' || userRole === 'MODERATOR';
 
     if (!isAdmin) {
       // Check if the user owns the review
@@ -203,7 +203,7 @@ export const updateReview = async (
 ): Promise<void> => {
   try {
     const reviewId = req.params.id;
-    const userId = req.user.id;
+    const userId = req.user!.id;
     const { rating, content } = req.body;
 
     const review = await prisma.review.findUnique({ where: { id: reviewId } });

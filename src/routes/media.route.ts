@@ -1,11 +1,11 @@
 import express from 'express';
 import { createMedia, getAllMedia, updateMedia, deleteMedia, searchMedia,getHomepageMedia, getMediaById } from '../controllers/media.controller';
-import { attachUserIfPresent, authenticate, isAdmin } from '../middlewares/auth.middleware';
+import { attachUserIfPresent, authenticate, requireCapability } from '../middlewares/auth.middleware';
 
 const router = express.Router();
 
 // Only Admins can create media
-router.post('/', authenticate, isAdmin, createMedia);
+router.post('/', authenticate, requireCapability('media:manage'), createMedia);
 
 // Advanced search with filters (public access, no auth required)
 router.get('/search', searchMedia);
@@ -14,8 +14,8 @@ router.get('/search', searchMedia);
 router.get('/', getAllMedia);
 router.get('/home', getHomepageMedia);
 
-router.put('/:id', authenticate, isAdmin, updateMedia);
-router.delete('/:id', authenticate, isAdmin, deleteMedia);
+router.put('/:id', authenticate, requireCapability('media:manage'), updateMedia);
+router.delete('/:id', authenticate, requireCapability('media:manage'), deleteMedia);
 router.get('/:id', attachUserIfPresent, getMediaById);
 
 export default router;

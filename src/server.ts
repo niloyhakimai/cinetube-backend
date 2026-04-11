@@ -13,6 +13,8 @@ import watchlistRoutes from './routes/watchlist.route';
 import subscriptionRoutes from './routes/subscription.route';
 import adminRoutes from './routes/admin.route';
 import tmdbRoutes from './routes/tmdb.route';
+import catalogRoutes from './routes/catalog.route';
+import aiRoutes from './routes/ai.route';
 import { getSubscriptionPlanFromPriceId } from './constants/subscription';
 import { sendPremiumWelcomeEmail } from './utils/email';
 import { recordSubscriptionPayment } from './utils/subscription-payment';
@@ -133,6 +135,8 @@ app.use('/api/watchlist', watchlistRoutes);
 app.use('/api/subscriptions', subscriptionRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/tmdb', tmdbRoutes);
+app.use('/api/catalog', catalogRoutes);
+app.use('/api/ai', aiRoutes);
 
 app.get('/', (req: Request, res: Response) => {
   res.send('CineTube Server is running...');

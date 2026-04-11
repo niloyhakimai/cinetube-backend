@@ -1,7 +1,8 @@
 import { Request, Response } from 'express';
 import bcrypt from 'bcrypt';
 import crypto from 'crypto';
-import { prisma } from '../server';
+import { Role } from '@prisma/client';
+import prisma from '../prisma/client';
 import jwt from 'jsonwebtoken';
 import { OAuth2Client } from 'google-auth-library';
 import { AuthRequest } from '../middlewares/auth.middleware';
@@ -9,6 +10,59 @@ import { serializeUser } from '../utils/serialize-user';
 import { sendPasswordResetEmail } from '../utils/email';
 
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+
+type DemoRole = 'USER' | 'ADMIN' | 'MODERATOR' | 'CURATOR';
+
+const DEMO_USERS: Record<DemoRole, { email: string; name: string; password: string; role: Role; favoriteGenres: string[] }> = {
+  USER: {
+    email: 'demo-user@cinetube.com',
+    name: 'Demo Viewer',
+    password: 'User123!',
+    role: Role.USER,
+    favoriteGenres: ['Action', 'Comedy', 'Sci-Fi'],
+  },
+  ADMIN: {
+    email: 'demo-admin@cinetube.com',
+    name: 'Demo Admin',
+    password: 'Admin123!',
+    role: Role.ADMIN,
+    favoriteGenres: ['Drama', 'Thriller'],
+  },
+  MODERATOR: {
+    email: 'demo-moderator@cinetube.com',
+    name: 'Demo Moderator',
+    password: 'Moderator123!',
+    role: Role.MODERATOR,
+    favoriteGenres: ['Crime', 'Mystery'],
+  },
+  CURATOR: {
+    email: 'demo-curator@cinetube.com',
+    name: 'Demo Curator',
+    password: 'Curator123!',
+    role: Role.CURATOR,
+    favoriteGenres: ['Drama', 'Romance', 'Fantasy'],
+  },
+};
+
+function signToken(user: { id: string; role: Role }) {
+  return jwt.sign(
+    { id: user.id, role: user.role },
+    process.env.JWT_SECRET as string,
+    { expiresIn: '1d' },
+  );
+}
+
+function normalizeGenres(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .filter((item): item is string => typeof item === 'string')
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .slice(0, 8);
+}
 
 function getClientUrl(req: Request): string {
   const configuredClientUrl = process.env.CLIENT_URL?.trim();
@@ -49,6 +103,7 @@ export const registerUser = async (req: Request, res: Response): Promise<void> =
         name,
         email,
         password: hashedPassword,
+        role: Role.USER,
       },
     });
 
@@ -83,11 +138,7 @@ export const loginUser = async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
-    const token = jwt.sign(
-      { id: user.id, role: user.role },
-      process.env.JWT_SECRET as string,
-      { expiresIn: '1d' }
-    );
+    const token = signToken(user);
 
     res.status(200).json({
       message: 'Login successful!',
@@ -131,17 +182,13 @@ export const googleLogin = async (req: Request, res: Response): Promise<void> =>
           name: name || 'Google User',
           email,
           password: hashedPassword,
-          role: 'USER',
+          role: Role.USER,
         },
       });
     }
 
 
-    const token = jwt.sign(
-      { id: user.id, role: user.role }, 
-      process.env.JWT_SECRET as string,
-      { expiresIn: '7d' }
-    );
+    const token = signToken(user);
 
     res.status(200).json({
       message: 'Google login successful',
@@ -151,6 +198,60 @@ export const googleLogin = async (req: Request, res: Response): Promise<void> =>
   } catch (error) {
     console.error('Google Login Error:', error);
     res.status(500).json({ message: 'Google login failed' });
+  }
+};
+
+export const loginDemoUser = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const requestedRole = ['ADMIN', 'MODERATOR', 'CURATOR', 'USER'].includes(req.body?.role)
+      ? req.body.role as DemoRole
+      : 'USER';
+    const demoConfig = DEMO_USERS[requestedRole];
+
+    const existingUser = await prisma.user.findUnique({
+      where: { email: demoConfig.email },
+    });
+
+    const hashedPassword = await bcrypt.hash(demoConfig.password, 10);
+    let user = existingUser;
+
+    if (!user) {
+      user = await prisma.user.create({
+        data: {
+          name: demoConfig.name,
+          email: demoConfig.email,
+          password: hashedPassword,
+          role: demoConfig.role,
+          favoriteGenres: demoConfig.favoriteGenres,
+        },
+      });
+    } else if (
+      user.role !== demoConfig.role ||
+      user.name !== demoConfig.name
+    ) {
+      user = await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          name: demoConfig.name,
+          role: demoConfig.role,
+          password: hashedPassword,
+          favoriteGenres: demoConfig.favoriteGenres,
+        },
+      });
+    }
+
+    res.status(200).json({
+      message: `${demoConfig.role.charAt(0)}${demoConfig.role.slice(1).toLowerCase()} demo session ready.`,
+      token: signToken(user),
+      user: serializeUser(user),
+      credentials: {
+        email: demoConfig.email,
+        password: demoConfig.password,
+      },
+    });
+  } catch (error) {
+    console.error('Demo Login Error:', error);
+    res.status(500).json({ message: 'Failed to start a demo session.' });
   }
 };
 
@@ -175,6 +276,47 @@ export const getCurrentUser = async (req: AuthRequest, res: Response): Promise<v
     res.status(200).json({ user: serializeUser(user) });
   } catch (error) {
     console.error('Get Current User Error:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+export const updateCurrentUser = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+
+    if (!userId) {
+      res.status(401).json({ message: 'Access denied. No user found in token.' });
+      return;
+    }
+
+    const name = typeof req.body.name === 'string' ? req.body.name.trim() : '';
+    const avatarUrl = typeof req.body.avatarUrl === 'string' ? req.body.avatarUrl.trim() : '';
+    const favoriteGenres = normalizeGenres(req.body.favoriteGenres);
+    const communicationOptIn = typeof req.body.communicationOptIn === 'boolean'
+      ? req.body.communicationOptIn
+      : true;
+
+    if (!name) {
+      res.status(400).json({ message: 'Name is required.' });
+      return;
+    }
+
+    const updatedUser = await prisma.user.update({
+      where: { id: userId },
+      data: {
+        name,
+        avatarUrl: avatarUrl || null,
+        favoriteGenres,
+        communicationOptIn,
+      },
+    });
+
+    res.status(200).json({
+      message: 'Profile updated successfully.',
+      user: serializeUser(updatedUser),
+    });
+  } catch (error) {
+    console.error('Update Current User Error:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
 };

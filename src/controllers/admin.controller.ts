@@ -1,68 +1,168 @@
 import { Response } from 'express';
 import { AuthRequest } from '../middlewares/auth.middleware';
-import { prisma } from '../server';
+import prisma from '../prisma/client';
+import { getCapabilitiesForRole } from '../middlewares/auth.middleware';
+
+const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+function buildMonthBuckets(size = 6) {
+  const now = new Date();
+
+  return Array.from({ length: size }).map((_, index) => {
+    const date = new Date(now.getFullYear(), now.getMonth() - (size - index - 1), 1);
+    return {
+      key: `${date.getFullYear()}-${date.getMonth()}`,
+      label: `${MONTH_LABELS[date.getMonth()]} ${String(date.getFullYear()).slice(-2)}`,
+      movieRevenue: 0,
+      subscriptionRevenue: 0,
+      approved: 0,
+      pending: 0,
+    };
+  });
+}
 
 export const getDashboardStats = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    // Security Check: Only ADMIN can access
-    if (req.user.role !== 'ADMIN') {
-      res.status(403).json({ message: 'Access denied. Admins only.' });
+    if (!req.user) {
+      res.status(401).json({ message: 'Access denied. No user found in token.' });
       return;
     }
 
-    // 1. Get overall counts
-    const totalUsers = await prisma.user.count();
-    const totalMedia = await prisma.media.count();
-    const totalReviews = await prisma.review.count({ where: { isApproved: true } });
-    const pendingReviewCount = await prisma.review.count({ where: { isApproved: false } });
+    const [users, media, reviews, purchases, subscriptionPayments, pendingReviews] = await Promise.all([
+      prisma.user.findMany({
+        include: {
+          reviews: { select: { id: true } },
+          watchlist: { select: { id: true } },
+          purchases: { select: { id: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+      }),
+      prisma.media.findMany({
+        include: {
+          reviews: {
+            where: { isApproved: true },
+            select: { rating: true },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+      }),
+      prisma.review.findMany({
+        include: {
+          media: { select: { id: true, title: true } },
+          user: { select: { id: true, name: true, email: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+      }),
+      prisma.purchase.findMany({
+        where: { paymentStatus: 'COMPLETED' },
+        include: {
+          media: { select: { id: true, title: true } },
+        },
+      }),
+      prisma.subscriptionPayment.findMany({
+        where: { paymentStatus: 'COMPLETED' },
+      }),
+      prisma.review.findMany({
+        where: { isApproved: false },
+        include: {
+          user: { select: { id: true, name: true, email: true } },
+          media: { select: { id: true, title: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+      }),
+    ]);
 
-    // 2. Get Pending Reviews with User & Media details
-    const pendingReviews = await prisma.review.findMany({
-      where: { isApproved: false },
-      include: {
-        user: { select: { id: true, name: true, email: true } },
-        media: { select: { id: true, title: true } }
-      },
-      orderBy: { createdAt: 'desc' }
-    });
+    const totalUsers = users.length;
+    const totalMedia = media.length;
+    const totalReviews = reviews.filter((review) => review.isApproved).length;
+    const pendingReviewCount = pendingReviews.length;
+    const activeUsers = users.filter((user) => (
+      user.reviews.length > 0 ||
+      user.watchlist.length > 0 ||
+      user.purchases.length > 0
+    )).length;
 
-    // 3. Media Analytics (Aggregated Reports for Top Rated & Most Reviewed)
-    const allMedia = await prisma.media.findMany({
-      include: { 
-        reviews: { 
-          where: { isApproved: true }, 
-          select: { rating: true } 
-        } 
-      }
-    });
-
-    // Calculate average ratings and review counts for all media
-    const mediaStats = allMedia.map((m: any) => {
-      const reviewCount = m.reviews.length;
+    const mediaStats = media.map((item) => {
+      const reviewCount = item.reviews.length;
       const avgRating = reviewCount > 0
-        ? (m.reviews.reduce((acc: number, rev: any) => acc + rev.rating, 0) / reviewCount).toFixed(1)
-        : '0.0';
-        
+        ? item.reviews.reduce((acc, review) => acc + review.rating, 0) / reviewCount
+        : 0;
+
       return {
-        id: m.id,
-        title: m.title,
-        type: m.type,
-        viewCount: m.viewCount || 0,
+        id: item.id,
+        title: item.title,
+        mediaType: item.mediaType,
+        viewCount: item.viewCount || 0,
         reviewCount,
-        avgRating: Number(avgRating)
+        avgRating: Number(avgRating.toFixed(1)),
+        priceType: item.priceType,
+        isFeatured: item.isFeatured,
       };
     });
 
-    // Sort for Most Reviewed (Top 5)
     const mostReviewed = [...mediaStats].sort((a, b) => b.reviewCount - a.reviewCount).slice(0, 5);
-    
-    // Sort for Top Rated (Top 5)
     const topRated = [...mediaStats].sort((a, b) => b.avgRating - a.avgRating).slice(0, 5);
+    const featuredMedia = mediaStats.filter((item) => item.isFeatured).slice(0, 8);
+    const monthlyBuckets = buildMonthBuckets();
 
-    // Send Response
+    purchases.forEach((purchase) => {
+      const key = `${purchase.createdAt.getFullYear()}-${purchase.createdAt.getMonth()}`;
+      const bucket = monthlyBuckets.find((entry) => entry.key === key);
+      if (bucket) {
+        bucket.movieRevenue += purchase.amount;
+      }
+    });
+
+    subscriptionPayments.forEach((payment) => {
+      const key = `${payment.createdAt.getFullYear()}-${payment.createdAt.getMonth()}`;
+      const bucket = monthlyBuckets.find((entry) => entry.key === key);
+      if (bucket) {
+        bucket.subscriptionRevenue += payment.amount;
+      }
+    });
+
+    reviews.forEach((review) => {
+      const key = `${review.createdAt.getFullYear()}-${review.createdAt.getMonth()}`;
+      const bucket = monthlyBuckets.find((entry) => entry.key === key);
+      if (!bucket) {
+        return;
+      }
+
+      if (review.isApproved) {
+        bucket.approved += 1;
+      } else {
+        bucket.pending += 1;
+      }
+    });
+
+    const subscriptionMixMap = new Map<string, number>();
+    subscriptionPayments.forEach((payment) => {
+      subscriptionMixMap.set(payment.plan, (subscriptionMixMap.get(payment.plan) || 0) + 1);
+    });
+
     res.status(200).json({
-      stats: { totalUsers, totalMedia, totalReviews, pendingReviewCount },
+      role: req.user.role,
+      capabilities: getCapabilitiesForRole(req.user.role),
+      stats: { totalUsers, totalMedia, totalReviews, pendingReviewCount, activeUsers },
       pendingReviews,
+      analytics: {
+        revenueByMonth: monthlyBuckets.map((entry) => ({
+          label: entry.label,
+          revenue: Number((entry.movieRevenue + entry.subscriptionRevenue).toFixed(2)),
+          movieRevenue: Number(entry.movieRevenue.toFixed(2)),
+          subscriptionRevenue: Number(entry.subscriptionRevenue.toFixed(2)),
+        })),
+        reviewTrends: monthlyBuckets.map((entry) => ({
+          label: entry.label,
+          approved: entry.approved,
+          pending: entry.pending,
+        })),
+        subscriptionMix: [...subscriptionMixMap.entries()].map(([plan, count]) => ({
+          plan,
+          count,
+        })),
+        featuredMedia,
+      },
       reports: {
         topRated,
         mostReviewed

@@ -5,7 +5,7 @@ import { AuthRequest } from '../middlewares/auth.middleware';
 export const addComment = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { reviewId, content } = req.body;
-    const userId = req.user.id;
+    const userId = req.user!.id;
 
     const newComment = await prisma.comment.create({
       data: {
@@ -31,7 +31,7 @@ export const addComment = async (req: AuthRequest, res: Response): Promise<void>
 export const toggleLike = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { reviewId } = req.body;
-    const userId = req.user.id;
+    const userId = req.user!.id;
 
     const existingLike = await prisma.like.findUnique({
       where: {

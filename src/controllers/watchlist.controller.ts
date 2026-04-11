@@ -6,7 +6,7 @@ import { AuthRequest } from '../middlewares/auth.middleware';
 export const toggleWatchlist = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { mediaId } = req.body;
-    const userId = req.user.id;
+    const userId = req.user!.id;
 
     if (!mediaId || typeof mediaId !== 'string') {
       res.status(400).json({ message: 'A valid mediaId is required.' });
@@ -65,7 +65,7 @@ export const toggleWatchlist = async (req: AuthRequest, res: Response): Promise<
 
 export const getUserWatchlist = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const userId = req.user.id;
+    const userId = req.user!.id;
 
     const watchlist = await prisma.watchlist.findMany({
       where: { userId },
